@@ -42,3 +42,10 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Environment files (contain Cognito userPoolId / clientId / clientSecret and
+# other deployment-specific config). Each dev must create their own copy from
+# a `.example` template — see `src/environments/environment.example.ts` if
+# present.
+/src/environments/environment.ts
+/src/environments/environment.prod.ts
