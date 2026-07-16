@@ -10,6 +10,7 @@ import {
 // 4$pJhEtOhH&Ny*Sv
 import { environment } from '../../../environments/environment';
 import { computeSecretHash } from './cognito-secret-hash';
+import { clippingParents } from '@popperjs/core';
 
 // amazon-cognito-identity-js v6.x removed built-in SECRET_HASH / ClientSecret
 // support, so any auth call that needs a SecretHash must be issued directly
@@ -41,6 +42,13 @@ export class AuthService {
   readonly registeredUser = signal<CognitoUser | null>(null);
 
   /**
+   * Set when signIn fails with Cognito's `UserNotConfirmedException`. The UI
+   * watches this to redirect to the confirmation flow with the username
+   * pre-filled. It is cleared at the start of every new signIn attempt.
+   */
+  readonly confirmRequired = signal<string | null>(null);
+
+  /**
    * Performs an SRP sign-in against Cognito, reusing the SDK's
    * `CognitoUser.authenticateUser` (SRP math, BigInteger, AuthenticationHelper)
    * and injecting SECRET_HASH via a short-lived `globalThis.fetch` patch.
@@ -65,6 +73,7 @@ export class AuthService {
   async signIn(username: string, password: string): Promise<void> {
     this.isLoading.set(true);
     this.didFail.set(false);
+    this.confirmRequired.set(null);
 
     try {
       const secretHash = await computeSecretHash(
@@ -72,6 +81,8 @@ export class AuthService {
         environment.clientId,
         environment.clientSecret,
       );
+
+      console.log({ secretHash });
 
       // Patch global fetch: every Cognito request passes through here with
       // an `X-Amz-Target: AWSCognitoIdentityProviderService.<Operation>`
@@ -137,6 +148,14 @@ export class AuthService {
             onFailure: (err: unknown) => {
               console.error(err);
               this.didFail.set(true);
+              // Cognito throws `UserNotConfirmedException` when the account
+              // exists but the email/phone verification code has not been
+              // redeemed yet. Surface that as `confirmRequired` so the UI
+              // can route to the confirmation form with the username
+              // pre-filled instead of just showing a generic failure.
+              if (isUserNotConfirmed(err)) {
+                this.confirmRequired.set(username);
+              }
               reject(err);
             },
           });
@@ -180,6 +199,9 @@ export class AuthService {
         SecretHash: secretHash,
       };
 
+      console.log({ secretHash });
+      console.log({ body });
+
       const response = await fetch(COGNITO_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -189,8 +211,10 @@ export class AuthService {
         body: JSON.stringify(body),
       });
 
+      console.log({ response });
+
       if (!response.ok) {
-        const errorPayload: { __type?: string; message?: string } = await response
+        const errorPayload: { __type?: string; message?: string; } = await response
           .json()
           .catch(() => ({}));
         throw new Error(
@@ -198,7 +222,8 @@ export class AuthService {
         );
       }
 
-      const data: { UserSub: string; UserConfirmed: boolean } = await response.json();
+      const data: { UserSub: string; UserConfirmed: boolean; } = await response.json();
+      console.log({ data });
       console.log('User registration successful. UserSub:', data.UserSub);
       this.didFail.set(false);
     } catch (err) {
@@ -246,7 +271,7 @@ export class AuthService {
       });
 
       if (!response.ok) {
-        const errorPayload: { __type?: string; message?: string } = await response
+        const errorPayload: { __type?: string; message?: string; } = await response
           .json()
           .catch(() => ({}));
         throw new Error(
@@ -275,4 +300,32 @@ export class AuthService {
       this.statusChanged.next(true);
     }
   }
+}
+
+/**
+ * Detects Cognito's `UserNotConfirmedException` regardless of whether the
+ * SDK surfaces it as a typed `code`/`name` field or as the JSON `__type`
+ * discriminator on the raw HTTP error. Returns `true` only for the exact
+ * "UserNotConfirmed" exception so unrelated failures still surface as
+ * generic `didFail`.
+ */
+function isUserNotConfirmed(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') {
+    return false;
+  }
+  const anyErr = err as {
+    code?: unknown;
+    name?: unknown;
+    message?: unknown;
+  };
+  const fields: unknown[] = [anyErr.code, anyErr.name];
+  for (const field of fields) {
+    if (typeof field === 'string' && field === 'UserNotConfirmedException') {
+      return true;
+    }
+  }
+  if (typeof anyErr.message === 'string' && anyErr.message.includes('UserNotConfirmedException')) {
+    return true;
+  }
+  return false;
 }

@@ -25,7 +25,14 @@
         />
       </div>
       @if (auth.didFail()) {
-        <div class="alert alert-danger py-2">Invalid credentials.</div>
+        <div class="alert alert-danger py-2">
+          @if (auth.confirmRequired()) {
+            Your account is not confirmed yet. Redirecting you to enter the
+            validation code…
+          } @else {
+            Invalid credentials.
+          }
+        </div>
       }
       @if (auth.isLoading()) {
         <div class="loader mb-3"></div>
