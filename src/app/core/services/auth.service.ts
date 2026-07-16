@@ -3,10 +3,11 @@ import { Router } from '@angular/router';
 import { Subject } from 'rxjs';
 import {
   CognitoUser,
+  CognitoUserPool,
   AuthenticationDetails,
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
-
+// 4$pJhEtOhH&Ny*Sv
 import { environment } from '../../../environments/environment';
 import { computeSecretHash } from './cognito-secret-hash';
 
@@ -16,6 +17,16 @@ import { computeSecretHash } from './cognito-secret-hash';
 // (`us-east-1_xxxxx` → `cognito-idp.us-east-1.amazonaws.com/`).
 const COGNITO_REGION = environment.userPoolId.split('_')[0];
 const COGNITO_ENDPOINT = `https://cognito-idp.${COGNITO_REGION}.amazonaws.com/`;
+
+// SDK wrapper still needs a CognitoUserPool to build `CognitoUser` instances
+// for `authenticateUser`. `ClientSecret` is omitted on purpose: the v6 SDK
+// silently drops it, so SECRET_HASH is injected later via the Client patch
+// inside `signIn`.
+const POOL_DATA = {
+  UserPoolId: environment.userPoolId,
+  ClientId: environment.clientId,
+};
+const userPool = new CognitoUserPool(POOL_DATA);
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -29,30 +40,118 @@ export class AuthService {
   readonly statusChanged = new Subject<boolean>();
   readonly registeredUser = signal<CognitoUser | null>(null);
 
-  /** Stub kept for API compatibility. Will call InitiateAuth with SECRET_HASH. */
+  /**
+   * Performs an SRP sign-in against Cognito, reusing the SDK's
+   * `CognitoUser.authenticateUser` (SRP math, BigInteger, AuthenticationHelper)
+   * and injecting SECRET_HASH via a short-lived `globalThis.fetch` patch.
+   *
+   * Why `fetch` and not `Client.prototype.request`: amazon-cognito-identity-js
+   * ships two parallel builds — `lib/Client.js` (CommonJS) and `es/Client.js`
+   * (ESM). With Angular's `@angular/build` (esbuild) + `module: preserve`,
+   * the SDK's internal `new Client(...)` calls construct instances from
+   * `es/Client`, so patching `lib/Client.prototype` (which we did before)
+   * affected a different prototype and SECRET_HASH never reached the wire.
+   * Both variants funnel through global `fetch`, so patching `fetch` is
+   * module-system agnostic and catches every outgoing Cognito request.
+   *
+   * Mirrors the example flow:
+   *   - authIsLoading → isLoading signal,
+   *   - onSuccess   → authDidFail=false, authStatusChanged=true,
+   *   - onFailure   → authDidFail=true.
+   *
+   * The patch is installed before `authenticateUser` and restored in a
+   * `finally` block so it never leaks past a single auth attempt.
+   */
   async signIn(username: string, password: string): Promise<void> {
     this.isLoading.set(true);
+    this.didFail.set(false);
 
-    // Reference implementation (kept as a comment until needed):
-    //
-    //   const secretHash = await computeSecretHash(username, environment.clientId, environment.clientSecret);
-    //   const body = {
-    //     AuthFlow: 'USER_SRP_AUTH',
-    //     ClientId: environment.clientId,
-    //     AuthParameters: {
-    //       USERNAME: username,
-    //       SRP_A: '<srp-a-value>',
-    //       SECRET_HASH: secretHash,
-    //     },
-    //   };
-    //   await fetch(COGNITO_ENDPOINT, { method: 'POST', headers: ..., body: JSON.stringify(body) });
-    //
-    void username;
-    void password;
+    try {
+      const secretHash = await computeSecretHash(
+        username,
+        environment.clientId,
+        environment.clientSecret,
+      );
 
-    this._isAuthenticated.set(true);
-    this.statusChanged.next(true);
-    this.isLoading.set(false);
+      // Patch global fetch: every Cognito request passes through here with
+      // an `X-Amz-Target: AWSCognitoIdentityProviderService.<Operation>`
+      // header. We parse the JSON body and inject SECRET_HASH into the
+      // right container for InitiateAuth / RespondToAuthChallenge.
+      const originalFetch = globalThis.fetch.bind(globalThis);
+      const patchedFetch: typeof globalThis.fetch = ((
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) =>
+        (async () => {
+          const safeInit: RequestInit = init ?? {};
+          const headers = new Headers(safeInit.headers);
+          const target = headers.get('X-Amz-Target');
+
+          if (
+            typeof target === 'string' &&
+            target.startsWith('AWSCognitoIdentityProviderService.') &&
+            typeof safeInit.body === 'string'
+          ) {
+            try {
+              const parsed = JSON.parse(safeInit.body) as {
+                AuthParameters?: Record<string, string>;
+                ChallengeResponses?: Record<string, string>;
+              };
+
+              if (target.endsWith('.InitiateAuth') && parsed.AuthParameters) {
+                parsed.AuthParameters['SECRET_HASH'] = secretHash;
+              } else if (
+                target.endsWith('.RespondToAuthChallenge') &&
+                parsed.ChallengeResponses
+              ) {
+                parsed.ChallengeResponses['SECRET_HASH'] = secretHash;
+              }
+              safeInit.body = JSON.stringify(parsed);
+            } catch {
+              // Body wasn't JSON or wasn't a Cognito request; let it pass.
+            }
+          }
+
+          return originalFetch(input, safeInit);
+        })()) as typeof globalThis.fetch;
+
+      globalThis.fetch = patchedFetch;
+
+      try {
+        const authDetails = new AuthenticationDetails({
+          Username: username,
+          Password: password,
+        });
+        const userData = { Username: username, Pool: userPool };
+        const cognitoUser = new CognitoUser(userData);
+
+        await new Promise<void>((resolve, reject) => {
+          cognitoUser.authenticateUser(authDetails, {
+            onSuccess: (result: CognitoUserSession) => {
+              console.log(result);
+              this._isAuthenticated.set(true);
+              this.statusChanged.next(true);
+              this.didFail.set(false);
+              resolve();
+            },
+            onFailure: (err: unknown) => {
+              console.error(err);
+              this.didFail.set(true);
+              reject(err);
+            },
+          });
+        });
+      } finally {
+        // Always restore, even on error, so concurrent or future callers
+        // do not pick up a stale SECRETHash from a previous attempt.
+        globalThis.fetch = originalFetch;
+      }
+    } catch {
+      // `didFail` is already set inside the inner `onFailure` handler.
+      // Swallow the rejection so the outer `finally` only does its job.
+    } finally {
+      this.isLoading.set(false);
+    }
   }
 
   /**
@@ -110,27 +209,60 @@ export class AuthService {
     }
   }
 
-  /** Stub kept for API compatibility. Will call ConfirmSignUp with SECRET_HASH. */
+  /**
+   * Confirms a previously-registered user against Cognito's REST endpoint
+   * directly, computing SECRET_HASH with Web Crypto (same reasoning as
+   * signUp: amazon-cognito-identity-js v6.x removed ClientSecret support).
+   *
+   * Mirrors the flow of the original `CognitoUser.confirmRegistration` call:
+   * sets isLoading up front, flips didFail on error, and navigates to `/`
+   * on success so the user lands on the sign-in page.
+   */
   async confirmUser(username: string, code: string): Promise<void> {
     this.isLoading.set(true);
+    this.didFail.set(false);
 
-    // Reference implementation (kept as a comment until needed):
-    //
-    //   const secretHash = await computeSecretHash(username, environment.clientId, environment.clientSecret);
-    //   const body = {
-    //     ClientId: environment.clientId,
-    //     Username: username,
-    //     ConfirmationCode: code,
-    //     SecretHash: secretHash,
-    //   };
-    //   await fetch(COGNITO_ENDPOINT, { method: 'POST', headers: ..., body: JSON.stringify(body) });
-    //
-    void username;
-    void code;
-    void AuthenticationDetails;
-    void CognitoUserSession;
+    try {
+      const secretHash = await computeSecretHash(
+        username,
+        environment.clientId,
+        environment.clientSecret,
+      );
 
-    this.isLoading.set(false);
+      const body = {
+        ClientId: environment.clientId,
+        Username: username,
+        ConfirmationCode: code,
+        SecretHash: secretHash,
+      };
+
+      const response = await fetch(COGNITO_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-amz-json-1.1',
+          'X-Amz-Target': 'AWSCognitoIdentityProviderService.ConfirmSignUp',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        const errorPayload: { __type?: string; message?: string } = await response
+          .json()
+          .catch(() => ({}));
+        throw new Error(
+          errorPayload.message ?? `ConfirmSignUp failed with HTTP ${response.status}`,
+        );
+      }
+
+      console.log('User confirmation successful.');
+      this.didFail.set(false);
+      this.router.navigate(['/']);
+    } catch (err) {
+      console.error('ConfirmSignUp error:', err);
+      this.didFail.set(true);
+    } finally {
+      this.isLoading.set(false);
+    }
   }
 
   logout(): void {
