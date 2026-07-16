@@ -1,0 +1,86 @@
+<div class="row justify-content-center">
+  <div class="col-12 col-md-6 col-lg-4">
+    <h2 class="mb-3">Sign Up</h2>
+    @if (!confirmUser) {
+      <form #usrForm="ngForm" (ngSubmit)="onSubmit()" novalidate>
+        <div class="mb-3">
+          <label for="su-username" class="form-label">Username</label>
+          <input
+            id="su-username"
+            name="username"
+            type="text"
+            class="form-control"
+            required
+            [(ngModel)]="username"
+          />
+        </div>
+        <div class="mb-3">
+          <label for="su-email" class="form-label">Email</label>
+          <input
+            id="su-email"
+            name="email"
+            type="email"
+            class="form-control"
+            required
+            email
+            [(ngModel)]="email"
+          />
+        </div>
+        <div class="mb-3">
+          <label for="su-password" class="form-label">Password</label>
+          <input
+            id="su-password"
+            name="password"
+            type="password"
+            class="form-control"
+            required
+            [(ngModel)]="password"
+          />
+        </div>
+        @if (auth.didFail()) {
+          <div class="alert alert-danger py-2">Sign up failed.</div>
+        }
+        @if (auth.isLoading()) {
+          <div class="loader mb-3"></div>
+        }
+        <button
+          type="submit"
+          class="btn btn-primary w-100"
+          [disabled]="auth.isLoading() || !usrForm.form.valid"
+        >
+          Sign Up
+        </button>
+      </form>
+    } @else {
+      <form #confirmForm="ngForm" (ngSubmit)="onConfirm()" novalidate>
+        <div class="mb-3">
+          <label for="conf-code" class="form-label">Validation Code</label>
+          <input
+            id="conf-code"
+            name="validationCode"
+            type="text"
+            class="form-control"
+            required
+            [(ngModel)]="validationCode"
+          />
+        </div>
+        <button
+          type="submit"
+          class="btn btn-success w-100"
+          [disabled]="!confirmForm.form.valid"
+        >
+          Confirm
+        </button>
+      </form>
+    }
+    <p class="mt-3 text-center">
+      Already registered?
+      <a routerLink="/">Sign In</a>
+    </p>
+    @if (!confirmUser) {
+      <p class="text-center">
+        <a role="button" (click)="onDoConfirm()">Have a validation code?</a>
+      </p>
+    }
+  </div>
+</div>

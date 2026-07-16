@@ -1,0 +1,74 @@
+<div class="row">
+  <div class="col-12">
+    <h2 class="mb-3">Compare Results</h2>
+    <div class="btn-toolbar mb-3" role="toolbar">
+      <div class="btn-group me-2" role="group" aria-label="Filter">
+        <button
+          type="button"
+          class="btn btn-outline-primary"
+          [class.active]="filter() === 'age'"
+          (click)="onFilter('age')"
+        >
+          Age
+        </button>
+        <button
+          type="button"
+          class="btn btn-outline-primary"
+          [class.active]="filter() === 'height'"
+          (click)="onFilter('height')"
+        >
+          Height
+        </button>
+        <button
+          type="button"
+          class="btn btn-outline-primary"
+          [class.active]="filter() === 'income'"
+          (click)="onFilter('income')"
+        >
+          Income
+        </button>
+      </div>
+      <div class="btn-group me-2" role="group" aria-label="Direction">
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          [class.active]="lowerIsBetter()"
+          (click)="onSelectLower(true)"
+        >
+          Lower is better
+        </button>
+        <button
+          type="button"
+          class="btn btn-outline-secondary"
+          [class.active]="!lowerIsBetter()"
+          (click)="onSelectLower(false)"
+        >
+          Higher is better
+        </button>
+      </div>
+    </div>
+    <div class="d-flex gap-2 mb-3">
+      <button type="button" class="btn btn-primary" (click)="onGetResults()">
+        Get Results
+      </button>
+      <button type="button" class="btn btn-warning" (click)="onStartSetData()">
+        Edit Data
+      </button>
+      <button type="button" class="btn btn-danger" (click)="onClearData()">
+        Clear Data
+      </button>
+    </div>
+    @if (didFail()) {
+      <div class="alert alert-danger py-2">Could not load results.</div>
+    }
+    <ul class="list-group">
+      @for (item of list; track item) {
+        <li class="list-group-item" [ngClass]="getListGroupItemClass(item)">
+          age: {{ item.age }} | height: {{ item.height }} | income: {{ item.income }}
+        </li>
+      } @empty {
+        <li class="list-group-item">No data yet.</li>
+      }
+    </ul>
+  </div>
+</div>

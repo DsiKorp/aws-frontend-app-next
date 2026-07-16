@@ -1,0 +1,24 @@
+❯ Building...
+✔ Building...
+Initial chunk files | Names             |  Raw size
+styles.css          | styles            | 277.30 kB | 
+scripts.js          | scripts           | 107.92 kB | 
+polyfills.js        | polyfills         |  55.81 kB | 
+main.js             | main              |   7.58 kB | 
+chunk-572Z2DVU.js   | -                 |   2.80 kB | 
+
+                    | Initial total     | 451.41 kB
+
+Lazy chunk files    | Names             |  Raw size
+chunk-JTQHZFIM.js   | compare-component |  28.77 kB | 
+chunk-CZR7NWQI.js   | sign-up-component |  13.86 kB | 
+chunk-JBEL7VO5.js   | sign-in-component |   8.13 kB | 
+
+Application bundle generation complete. [1.766 seconds] - 2026-07-15T23:56:48.192Z
+
+Watch mode enabled. Watching for file changes...
+NOTE: Raw file sizes do not reflect development server per-request transformations.
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m4200[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://193.168.10.17:[1m4200[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.25.240.1:[1m4200[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://192.168.96.1:[1m4200[22m/[39m
