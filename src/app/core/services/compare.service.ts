@@ -124,7 +124,10 @@ export class CompareService {
       const idToken = session.getIdToken().getJwtToken();
       const queryParam = `?accessToken=${accessToken}`;
       const urlParam = all ? 'all' : 'single';
-      const headers = new HttpHeaders({ Authorization: idToken });
+      const headers = new HttpHeaders({
+        Authorization: idToken,
+        'Content-Type': 'application/json',
+      });
 
       console.log("_".repeat(50));
       console.log({
