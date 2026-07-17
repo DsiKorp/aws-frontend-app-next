@@ -1,6 +1,5 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
 
 import { CompareService } from '../../core/services/compare.service';
 import { CompareData } from '../../core/models/compare-data.model';
@@ -18,28 +17,6 @@ export class CompareInputComponent {
   age: number | null = null;
   height: number | null = null;
   income: number | null = null;
-
-  private readonly subs: Subscription[] = [];
-
-  constructor() {
-    this.subs.push(
-      this.compareService.dataIsLoading.subscribe((loading) => {
-        this.compareService.isLoading.set(loading);
-      }),
-      this.compareService.dataLoadFailed.subscribe((failed) => {
-        this.compareService.loadFailed.set(failed);
-        if (failed) {
-          this.compareService.isLoading.set(false);
-        }
-      }),
-    );
-  }
-
-  ngOnDestroy(): void {
-    for (const sub of this.subs) {
-      sub.unsubscribe();
-    }
-  }
 
   onSubmit(): void {
     const data: CompareData = {

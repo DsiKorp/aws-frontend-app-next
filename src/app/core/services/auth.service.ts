@@ -39,7 +39,15 @@ export class AuthService {
   readonly isLoading = signal(false);
   readonly didFail = signal(false);
   readonly statusChanged = new Subject<boolean>();
-  readonly registeredUser = signal<CognitoUser | null>(null);
+
+  /**
+   * Cognito's machine-readable error code for the most recent failure
+   * (e.g. `UsernameExistsException`, `InvalidPasswordException`,
+   * `InvalidParameterException`, `UserNotConfirmedException`,
+   * `NotAuthorizedException`). The UI uses this to pick a friendly
+   * message or open a modal. Cleared at the start of every new attempt.
+   */
+  readonly lastErrorCode = signal<string | null>(null);
 
   /**
    * Set when signIn fails with Cognito's `UserNotConfirmedException`. The UI
@@ -74,6 +82,7 @@ export class AuthService {
     this.isLoading.set(true);
     this.didFail.set(false);
     this.confirmRequired.set(null);
+    this.lastErrorCode.set(null);
 
     try {
       const secretHash = await computeSecretHash(
@@ -179,10 +188,17 @@ export class AuthService {
    *
    * SignUp supports `SecretHash` as a top-level field (it isn't part of
    * the AuthParameters object as it is in InitiateAuth).
+   *
+   * On failure the Cognito response body contains an `__type` field with
+   * the exception name (e.g. `UsernameExistsException`,
+   * `InvalidPasswordException`, `InvalidParameterException`). We surface
+   * that to the UI via `lastErrorCode` so it can pick a friendly message;
+   * `didFail` stays true so the existing in-form alert still works.
    */
   async signUp(username: string, email: string, password: string): Promise<void> {
     this.isLoading.set(true);
     this.didFail.set(false);
+    this.lastErrorCode.set(null);
 
     try {
       const secretHash = await computeSecretHash(
@@ -199,9 +215,6 @@ export class AuthService {
         SecretHash: secretHash,
       };
 
-      console.log({ secretHash });
-      console.log({ body });
-
       const response = await fetch(COGNITO_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -211,19 +224,18 @@ export class AuthService {
         body: JSON.stringify(body),
       });
 
-      console.log({ response });
-
       if (!response.ok) {
         const errorPayload: { __type?: string; message?: string; } = await response
           .json()
           .catch(() => ({}));
+        const code = stripTypePrefix(errorPayload.__type);
+        this.lastErrorCode.set(code);
         throw new Error(
           errorPayload.message ?? `SignUp failed with HTTP ${response.status}`,
         );
       }
 
       const data: { UserSub: string; UserConfirmed: boolean; } = await response.json();
-      console.log({ data });
       console.log('User registration successful. UserSub:', data.UserSub);
       this.didFail.set(false);
     } catch (err) {
@@ -235,17 +247,32 @@ export class AuthService {
   }
 
   /**
-   * Confirms a previously-registered user against Cognito's REST endpoint
-   * directly, computing SECRET_HASH with Web Crypto (same reasoning as
-   * signUp: amazon-cognito-identity-js v6.x removed ClientSecret support).
+   * Confirms a previously-registered user via the SDK's
+   * `CognitoUser.confirmRegistration(code, forceAliasCreation, callback)`.
    *
-   * Mirrors the flow of the original `CognitoUser.confirmRegistration` call:
-   * sets isLoading up front, flips didFail on error, and navigates to `/`
-   * on success so the user lands on the sign-in page.
+   * Mirrors the example flow from the original Angular 4 service:
+   *   - sets isLoading up front,
+   *   - flips didFail on error,
+   *   - on success clears isLoading.
+   *
+   * Because the app is **zoneless**, navigation triggered from inside the
+   * SDK callback (which runs on a native microtask) does not always
+   * reach the Angular Router. We therefore return a boolean from the
+   * service and let the calling component do the navigation itself
+   * inside the Angular zone.
+   *
+   * Because `amazon-cognito-identity-js@6.x` removed built-in ClientSecret
+   * support, we patch `globalThis.fetch` for the duration of the call and
+   * inject `SECRET_HASH` into the outgoing `ConfirmSignUp` body — same
+   * mechanism that `signIn` uses for `InitiateAuth` /
+   * `RespondToAuthChallenge`.
+   *
+   * @returns `true` on success, `false` on failure.
    */
-  async confirmUser(username: string, code: string): Promise<void> {
+  async confirmUser(username: string, code: string): Promise<boolean> {
     this.isLoading.set(true);
     this.didFail.set(false);
+    this.lastErrorCode.set(null);
 
     try {
       const secretHash = await computeSecretHash(
@@ -254,43 +281,97 @@ export class AuthService {
         environment.clientSecret,
       );
 
-      const body = {
-        ClientId: environment.clientId,
-        Username: username,
-        ConfirmationCode: code,
-        SecretHash: secretHash,
-      };
+      const originalFetch = globalThis.fetch.bind(globalThis);
+      const patchedFetch: typeof globalThis.fetch = ((
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) =>
+        (async () => {
+          const safeInit: RequestInit = init ?? {};
+          const headers = new Headers(safeInit.headers);
+          const target = headers.get('X-Amz-Target');
 
-      const response = await fetch(COGNITO_ENDPOINT, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-amz-json-1.1',
-          'X-Amz-Target': 'AWSCognitoIdentityProviderService.ConfirmSignUp',
-        },
-        body: JSON.stringify(body),
-      });
+          if (
+            typeof target === 'string' &&
+            target === 'AWSCognitoIdentityProviderService.ConfirmSignUp' &&
+            typeof safeInit.body === 'string'
+          ) {
+            try {
+              const parsed = JSON.parse(safeInit.body) as {
+                SecretHash?: string;
+              };
+              parsed.SecretHash = secretHash;
+              safeInit.body = JSON.stringify(parsed);
+            } catch {
+              // Body wasn't JSON; let it pass.
+            }
+          }
 
-      if (!response.ok) {
-        const errorPayload: { __type?: string; message?: string; } = await response
-          .json()
-          .catch(() => ({}));
-        throw new Error(
-          errorPayload.message ?? `ConfirmSignUp failed with HTTP ${response.status}`,
-        );
+          return originalFetch(input, safeInit);
+        })()) as typeof globalThis.fetch;
+
+      globalThis.fetch = patchedFetch;
+
+      try {
+        const userData = { Username: username, Pool: userPool };
+        const cognitoUser = new CognitoUser(userData);
+
+        const result = await new Promise<{ ok: boolean; }>((resolve) => {
+          cognitoUser.confirmRegistration(code, true, (err, sdkResult) => {
+            if (err) {
+              console.error('ConfirmRegistration error:', err);
+              this.didFail.set(true);
+              resolve({ ok: false });
+              return;
+            }
+            console.log('User confirmation successful.', sdkResult);
+            this.confirmRequired.set(null);
+            this.didFail.set(false);
+            resolve({ ok: true });
+          });
+        });
+        return result.ok;
+      } finally {
+        // Always restore, even on error, so concurrent or future callers
+        // do not pick up a stale SECRET_HASH from a previous attempt.
+        globalThis.fetch = originalFetch;
       }
-
-      console.log('User confirmation successful.');
-      this.didFail.set(false);
-      this.router.navigate(['/']);
-    } catch (err) {
-      console.error('ConfirmSignUp error:', err);
-      this.didFail.set(true);
+    } catch {
+      // `didFail` is already set inside the inner callback.
+      // Swallow the rejection so the outer `finally` only does its job.
+      return false;
     } finally {
       this.isLoading.set(false);
     }
   }
 
+  /**
+   * Performs a full sign-out:
+   *   1. Calls the SDK's `CognitoUser.signOut()` to clear the in-memory
+   *      session and fire the global `signOut` event.
+   *   2. Deletes every `localStorage` key the SDK may have written
+   *      (they follow the pattern
+   *      `CognitoIdentityServiceProvider.<clientId>.<username>.*`).
+   *   3. Updates the in-memory signals so the navbar switches to the
+   *      unauthenticated view and the `App` component routes to `/`.
+   *
+   * Without step 2 the tokens stick around in `localStorage` and the
+   * SDK will re-hydrate them on the next page load, which makes the
+   * user appear "still logged in" until the access token expires.
+   */
   logout(): void {
+    try {
+      const current = userPool.getCurrentUser();
+      current?.signOut();
+    } catch (err) {
+      // `signOut()` is best-effort: even if it throws (e.g. no
+      // active session), we still want to wipe local storage and
+      // flip the auth signal.
+      console.warn('CognitoUser.signOut failed; continuing cleanup', err);
+    }
+
+    clearCognitoLocalStorage();
+
     this._isAuthenticated.set(false);
     this.statusChanged.next(false);
   }
@@ -299,6 +380,10 @@ export class AuthService {
     if (this._isAuthenticated()) {
       this.statusChanged.next(true);
     }
+  }
+
+  getAuthenticatedUser() {
+    return userPool.getCurrentUser();
   }
 }
 
@@ -328,4 +413,49 @@ function isUserNotConfirmed(err: unknown): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Cognito's `__type` field on error responses is namespaced, e.g.
+ *   com.amazonaws.cognito.idp.model.UsernameExistsException
+ * Strip everything up to and including the last `.` so we end up with
+ * the bare exception name (`UsernameExistsException`). If `__type` is
+ * missing or empty, returns `null` so callers can fall back to a
+ * generic failure UI.
+ */
+function stripTypePrefix(type: string | undefined): string | null {
+  if (typeof type !== 'string' || type.length === 0) {
+    return null;
+  }
+  const lastDot = type.lastIndexOf('.');
+  return lastDot === -1 ? type : type.slice(lastDot + 1);
+}
+
+/**
+ * Removes every `localStorage` key written by the Cognito SDK.
+ *
+ * The SDK uses the key pattern:
+ *   `CognitoIdentityServiceProvider.<clientId>.<username>.<field>`
+ * where `<field>` is one of `LastAuthUser`, `accessToken`, `clockDrift`,
+ * `idToken`, `refreshToken`. We iterate `localStorage` and delete any
+ * key that starts with the well-known SDK prefix, regardless of the
+ * current clientId / username — this also catches stale entries from
+ * previous users who shared the same browser.
+ */
+function clearCognitoLocalStorage(): void {
+  if (typeof globalThis.localStorage === 'undefined') {
+    return;
+  }
+  const storage = globalThis.localStorage;
+  const cognitoPrefix = 'CognitoIdentityServiceProvider.';
+  const keysToDelete: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (key !== null && key.startsWith(cognitoPrefix)) {
+      keysToDelete.push(key);
+    }
+  }
+  for (const key of keysToDelete) {
+    storage.removeItem(key);
+  }
 }

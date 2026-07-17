@@ -1,7 +1,7 @@
 <div class="row justify-content-center">
   <div class="col-12 col-md-6 col-lg-4">
     <h2 class="mb-3">Sign Up</h2>
-    @if (!confirmUser) {
+    @if (!confirmUser()) {
       <form #usrForm="ngForm" (ngSubmit)="onSubmit()" novalidate>
         <div class="mb-3">
           <label for="su-username" class="form-label">Username</label>
@@ -11,7 +11,8 @@
             type="text"
             class="form-control"
             required
-            [(ngModel)]="username"
+            [ngModel]="username()"
+            (ngModelChange)="username.set($event)"
           />
         </div>
         <div class="mb-3">
@@ -23,7 +24,8 @@
             class="form-control"
             required
             email
-            [(ngModel)]="email"
+            [ngModel]="email()"
+            (ngModelChange)="email.set($event)"
           />
         </div>
         <div class="mb-3">
@@ -34,8 +36,24 @@
             type="password"
             class="form-control"
             required
-            [(ngModel)]="password"
+            [ngModel]="password()"
+            (ngModelChange)="password.set($event)"
           />
+        </div>
+        <div class="mb-3">
+          <label for="su-confirm-password" class="form-label">Confirm Password</label>
+          <input
+            id="su-confirm-password"
+            name="confirmPassword"
+            type="password"
+            class="form-control"
+            required
+            [ngModel]="confirmPassword()"
+            (ngModelChange)="confirmPassword.set($event)"
+          />
+          @if (passwordsMismatch()) {
+            <div class="text-danger small mt-1">Passwords do not match!</div>
+          }
         </div>
         @if (auth.didFail()) {
           <div class="alert alert-danger py-2">Sign up failed.</div>
@@ -46,7 +64,7 @@
         <button
           type="submit"
           class="btn btn-primary w-100"
-          [disabled]="auth.isLoading() || !usrForm.form.valid"
+          [disabled]="auth.isLoading() || !usrForm.form.valid || passwordsMismatch()"
         >
           Sign Up
         </button>
@@ -61,7 +79,8 @@
             type="text"
             class="form-control"
             required
-            [(ngModel)]="validationCode"
+            [ngModel]="validationCode()"
+            (ngModelChange)="validationCode.set($event)"
           />
         </div>
         <button
@@ -77,10 +96,68 @@
       Already registered?
       <a routerLink="/">Sign In</a>
     </p>
-    @if (!confirmUser) {
+    @if (!confirmUser()) {
       <p class="text-center">
         <a role="button" (click)="onDoConfirm()">Have a validation code?</a>
       </p>
     }
   </div>
 </div>
+
+@if (activeError(); as err) {
+  <div
+    class="modal d-block"
+    tabindex="-1"
+    role="dialog"
+    aria-labelledby="signup-error-title"
+    aria-modal="true"
+    data-testid="signup-error-modal"
+  >
+    <div class="modal-dialog modal-dialog-centered" role="document">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="signup-error-title">{{ err.title }}</h5>
+          <button
+            type="button"
+            class="btn-close"
+            aria-label="Close"
+            (click)="closeErrorModal()"
+          ></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-0">{{ err.message }}</p>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-outline-secondary"
+            (click)="closeErrorModal()"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="onErrorAction()"
+          >
+            @switch (err.action) {
+              @case ('signin') {
+                Go to Sign In
+              }
+              @case ('fix-password') {
+                Fix password
+              }
+              @case ('fix-fields') {
+                Fix fields
+              }
+              @default {
+                OK
+              }
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop fade show" (click)="closeErrorModal()"></div>
+}

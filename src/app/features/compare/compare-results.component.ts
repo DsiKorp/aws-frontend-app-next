@@ -1,6 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { Subscription } from 'rxjs';
 
 import { CompareService } from '../../core/services/compare.service';
 import { CompareData } from '../../core/models/compare-data.model';
@@ -17,28 +16,10 @@ export class CompareResultsComponent {
 
   readonly filter = signal<'age' | 'height' | 'income'>('age');
   readonly lowerIsBetter = signal(false);
-  readonly didFail = signal(false);
-
-  private readonly subs: Subscription[] = [];
+  readonly didFail = computed(() => this.compareService.loadFailed());
 
   constructor() {
-    this.subs.push(
-      this.compareService.dataEdited.subscribe(() => {
-        // userData refreshed in service
-      }),
-      this.compareService.dataLoaded.subscribe((data) => {
-        this.compareService.compareData.set(data ?? []);
-      }),
-      this.compareService.dataLoadFailed.subscribe((failed) => {
-        this.didFail.set(failed);
-      }),
-    );
-  }
-
-  ngOnDestroy(): void {
-    for (const sub of this.subs) {
-      sub.unsubscribe();
-    }
+    this.compareService.onRetrieveData();
   }
 
   get user(): CompareData | undefined {

@@ -23,12 +23,13 @@
 - Routes (`src/app/app.routes.ts:5-26`): `/` → lazy `SignInComponent`, `/signup` → lazy `SignUpComponent`, `/compare` → lazy `CompareComponent` protected by `authGuard`. Wildcard `**` redirects to `/`.
 - Auth (`src/app/core/services/auth.service.ts`):
   - `signIn` is now real: SRP via `CognitoUser.authenticateUser`, with `SECRET_HASH` injected by patching `globalThis.fetch` for the duration of the call (see `auth.service.ts:80-118`). The patch is restored in `finally`.
-  - `signUp` and `confirmUser` call Cognito REST directly (`https://cognito-idp.<region>.amazonaws.com/`) because `amazon-cognito-identity-js@6.x` dropped `ClientSecret`/`SecretHash` support.
+  - `signUp` calls Cognito REST directly (`https://cognito-idp.<region>.amazonaws.com/`) because `amazon-cognito-identity-js@6.x` dropped `ClientSecret`/`SecretHash` support. `confirmUser` uses the SDK's `CognitoUser.confirmRegistration` with the same `globalThis.fetch` patch to inject `SECRET_HASH`.
   - `computeSecretHash` (in `src/app/core/services/cognito-secret-hash.ts`) implements `base64(HMAC-SHA256(clientSecret, username + clientId))` via Web Crypto.
   - `init()` only emits `statusChanged(true)` if `_isAuthenticated` is already true; it does **not** emit `false`, otherwise `App` would force-navigate to `/` from any other route (this was a deliberate fix — the original Angular 4 version had that bug).
   - `AuthService.init()` is called from `App`'s constructor (`src/app/app.ts:24`).
 - Guard (`src/app/core/services/auth.guard.ts`): functional `CanActivateFn`, returns `router.parseUrl('/')` when `auth.isAuthenticated()` is false.
-- Compare (`src/app/core/services/compare.service.ts:10-11`): `baseUrl` is still the placeholder `https://API_ID.execute-api.REGION.amazonaws.com/dev/` with hardcoded `Authorization: XX/XXX` headers. Real backend wiring is not done.
+- Sign-up form (`src/app/features/sign-up/sign-up.component.{ts,html}`): all form state lives in `signal()` fields; mismatch between `password` and `confirmPassword` is exposed as a `computed` (`passwordsMismatch()`) and surfaces as inline `Passwords do not match!` text. The Submit button is disabled until `usrForm.form.valid && !passwordsMismatch()`. Template binds signals via explicit `[ngModel]="x()" (ngModelChange)="x.set($event)"` because `[(ngModel)]` cannot write to a `WritableSignal`.
+- Compare (`src/app/core/services/compare.service.ts`): `API_BASE_URL` points at the real API Gateway (`https://hsp33ckp48.execute-api.us-east-1.amazonaws.com/dev/compare-yourself`). All three methods fetch the Cognito session via `authService.getAuthenticatedUser()?.getSession(...)` and use `session.getIdToken().getJwtToken()` for `Authorization`. `onRetrieveData` and `onDeleteData` additionally send `?accessToken=<accessToken>`. A successful `onDeleteData` clears `userData`/`compareData`/`edited` so `CompareComponent` swaps back to `<app-compare-input>`.
 
 ## Required polyfills and permissions
 
@@ -65,7 +66,7 @@
 - `src/app/app.routes.ts` — lazy routes.
 - `src/polyfills.ts`, `src/shim-global.ts`, `src/types/buffer.d.ts` — Cognito/CommonJS browser shims.
 - `src/app/core/services/auth.service.ts`, `cognito-secret-hash.ts`, `auth.guard.ts` — Cognito SRP sign-in, SECRET_HASH helper, guard.
-- `src/app/core/services/compare.service.ts` — placeholder backend client.
+- `src/app/core/services/compare.service.ts` — real backend client (see bullet above for Cognito session flow).
 - `src/app/core/models/{user,compare-data}.model.ts` — interfaces.
 - `src/app/features/sign-in/`, `features/sign-up/`, `features/compare/` — feature standalone components (compare is split into `compare.component.ts` + `compare-input.component.ts` + `compare-results.component.ts`).
 - `playwright.config.ts`, `e2e/compare-yourself.spec.ts` — 4 specs (navbar, `/compare` guard, sign-in happy path, `/signup` render).

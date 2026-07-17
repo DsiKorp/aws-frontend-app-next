@@ -4,57 +4,29 @@
     <form #compareForm="ngForm" (ngSubmit)="onSubmit()" novalidate>
       <div class="mb-3">
         <label for="age" class="form-label">Age</label>
-        <input
-          id="age"
-          name="age"
-          type="number"
-          class="form-control"
-          required
-          [(ngModel)]="age"
-        />
+        <input id="age" name="age" type="number" class="form-control" required [(ngModel)]="age" />
       </div>
       <div class="mb-3">
         <label for="height" class="form-label">Height (cm)</label>
-        <input
-          id="height"
-          name="height"
-          type="number"
-          class="form-control"
-          required
-          [(ngModel)]="height"
-        />
+        <input id="height" name="height" type="number" class="form-control" required [(ngModel)]="height" />
       </div>
       <div class="mb-3">
         <label for="income" class="form-label">Income</label>
-        <input
-          id="income"
-          name="income"
-          type="number"
-          class="form-control"
-          required
-          [(ngModel)]="income"
-        />
+        <input id="income" name="income" type="number" class="form-control" required [(ngModel)]="income" />
       </div>
       @if (compareService.loadFailed()) {
-        <div class="alert alert-danger py-2">Could not save your data.</div>
+      <div class="alert alert-danger py-2">Could not save your data.</div>
       }
       @if (compareService.isLoading()) {
-        <div class="loader mb-3"></div>
+      <div class="loader mb-3"></div>
       }
       <div class="d-grid gap-2">
-        <button
-          type="submit"
-          class="btn btn-primary"
-          [disabled]="compareService.isLoading() || !compareForm.form.valid"
-        >
+        <button type="submit" class="btn btn-primary"
+          [disabled]="compareService.isLoading() || !compareForm.form.valid">
           Save Data
         </button>
-        <button
-          type="button"
-          class="btn btn-outline-secondary"
-          (click)="onFetchStoredData()"
-          [disabled]="compareService.isLoading()"
-        >
+        <button type="button" class="btn btn-outline-secondary" (click)="onFetchStoredData()"
+          [disabled]="compareService.isLoading()">
           Fetch Stored Data
         </button>
       </div>
