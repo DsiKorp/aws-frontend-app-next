@@ -9,7 +9,7 @@ test.describe('Compare Yourself', () => {
   });
 
   test('redirects unauthenticated users away from /compare', async ({ page }) => {
-    await page.goto('/compare');
+    await page.goto('/#/compare');
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { name: 'Sign In' })).toBeVisible();
   });
@@ -48,7 +48,7 @@ test.describe('Compare Yourself', () => {
   });
 
   test('renders the Sign Up page', async ({ page }) => {
-    await page.goto('/signup');
+    await page.goto('/#/signup');
     await expect(page.getByRole('heading', { name: 'Sign Up' })).toBeVisible();
     await expect(page.locator('input[name="username"]')).toBeVisible();
     await expect(page.locator('input[name="email"]')).toBeVisible();
@@ -57,7 +57,7 @@ test.describe('Compare Yourself', () => {
   });
 
   test('pre-fills username and skips to confirmation when ?mode=confirm', async ({ page }) => {
-    await page.goto('/signup?username=alice&mode=confirm');
+    await page.goto('/#/signup?username=alice&mode=confirm');
     await expect(page.getByRole('heading', { name: 'Sign Up' })).toBeVisible();
     // In confirm mode the sign-up form is replaced by the validation-code
     // form; the username is held in component state but not rendered as an
@@ -85,7 +85,7 @@ test.describe('Compare Yourself', () => {
       }),
     );
 
-    await page.goto('/signup');
+    await page.goto('/#/signup');
     await page.locator('input[name="username"]').fill('taken-user');
     await page.locator('input[name="email"]').fill('taken@example.com');
     await page.locator('input[name="password"]').fill('Sup3rSecret!');
@@ -120,7 +120,7 @@ test.describe('Compare Yourself', () => {
     );
 
     // Path 1: header X (.btn-close).
-    await page.goto('/signup');
+    await page.goto('/#/signup');
     await page.locator('input[name="username"]').fill('u1');
     await page.locator('input[name="email"]').fill('a@b.c');
     await page.locator('input[name="password"]').fill('Sup3rSecret!');
@@ -165,7 +165,7 @@ test.describe('Compare Yourself', () => {
       route.continue();
     });
 
-    await page.goto('/signup?username=jcdelgadoop76&mode=confirm');
+    await page.goto('/#/signup?username=jcdelgadoop76&mode=confirm');
     await page.locator('input[name="validationCode"]').fill('123456');
     await page.getByRole('button', { name: 'Confirm' }).click();
 
@@ -247,7 +247,7 @@ test.describe('Compare Yourself', () => {
   });
 
   test('disables Sign Up when passwords do not match', async ({ page }) => {
-    await page.goto('/signup');
+    await page.goto('/#/signup');
     await page.locator('input[name="username"]').fill('alice');
     await page.locator('input[name="email"]').fill('a@b.c');
     await page.locator('input[name="password"]').fill('FirstPass1!');
@@ -261,7 +261,7 @@ test.describe('Compare Yourself', () => {
   });
 
   test('re-enables Sign Up when passwords are corrected to match', async ({ page }) => {
-    await page.goto('/signup');
+    await page.goto('/#/signup');
     await page.locator('input[name="username"]').fill('alice');
     await page.locator('input[name="email"]').fill('a@b.c');
     await page.locator('input[name="password"]').fill('SamePass1!');
